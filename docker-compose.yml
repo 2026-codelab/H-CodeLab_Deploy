@@ -17,7 +17,7 @@ x-judgehost: &judgehost
   networks: [hcl-net]
 
 x-judgehost-env: &judgehost-env
-  DOMSERVER_BASEURL: http://domserver/
+  DOMSERVER_BASEURL: http://domserver/domjudge/   # domserver WEBAPP_BASEURL 과 맞춘다
   JUDGEDAEMON_USERNAME: judgehost
   JUDGEDAEMON_PASSWORD: ${JUDGEDAEMON_PASSWORD:-not-set-yet}
   CONTAINER_TIMEZONE: Asia/Seoul
@@ -53,7 +53,7 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       FRONTEND_URL: ${SITE_URL}
       COOKIE_SECURE: ${COOKIE_SECURE}
-      DOMJUDGE_URL: http://domserver
+      DOMJUDGE_URL: http://domserver/domjudge
       DOMJUDGE_ID: ${DOMJUDGE_API_USER}
       DOMJUDGE_PW: ${DOMJUDGE_API_PASSWORD:-not-set-yet}
       LLM_API_KEY: ${LLM_API_KEY}
@@ -116,8 +116,12 @@ services:
       MYSQL_USER: domjudge
       MYSQL_PASSWORD: ${DOM_DB_PASSWORD}
       MYSQL_ROOT_PASSWORD: ${DOM_DB_ROOT_PASSWORD}
+      # 관리자 화면을 https://<사이트>/domjudge/ 로 연다 (nginx 가 전달)
+      WEBAPP_BASEURL: /domjudge
+      # nginx 컨테이너(도커 내부망)를 프록시로 신뢰해서 https 와 실제 접속 IP 를 알게 한다
+      TRUSTED_PROXIES: "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
     ports:
-      - "127.0.0.1:12345:80"   # 관리자 화면: SSH 터널로만 접속
+      - "127.0.0.1:12345:80"   # 서버 안에서 직접 확인용 (http://localhost:12345/domjudge/)
     volumes:
       - domserver_etc:/opt/domjudge/domserver/etc
     depends_on:
