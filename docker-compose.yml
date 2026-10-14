@@ -63,6 +63,8 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-unused}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-unused}
       SSH_TUNNEL_ENABLED: "false"
+      # 메일은 선택 기능이라 헬스체크에서 뺀다 (Gmail 미설정·장애로 배포가 실패하지 않도록)
+      MANAGEMENT_HEALTH_MAIL_ENABLED: "false"
     volumes:
       - backend_logs:/var/log/handongjudge
     depends_on:
