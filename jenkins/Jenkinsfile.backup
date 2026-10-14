@@ -1,0 +1,16 @@
+// 매일 새벽 4시쯤 DB 2개를 백업한다 (/home/codelab/hcl-backup, 7일 보관)
+pipeline {
+    agent any
+    triggers { cron('H 4 * * *') }
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '14'))
+    }
+    stages {
+        stage('Backup') {
+            steps {
+                sh 'bash /home/codelab/hcl/scripts/backup.sh'
+            }
+        }
+    }
+}

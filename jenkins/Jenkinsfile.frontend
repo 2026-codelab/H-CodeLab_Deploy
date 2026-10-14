@@ -1,0 +1,68 @@
+// H-CodeLab 프론트엔드 자동 배포
+// H-CodeLab_FE 의 master 가 바뀌면(3분마다 확인) React 를 빌드한 nginx 이미지를 만들고 nginx 컨테이너만 교체한다.
+pipeline {
+    agent any
+    triggers { pollSCM('H/3 * * * *') }
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+    environment {
+        IMAGE = 'hcl-frontend'
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                dir('app') {
+                    git url: 'https://github.com/2026-codelab/H-CodeLab_FE.git', branch: 'master'
+                }
+                script {
+                    env.TAG = sh(script: 'git -C app rev-parse --short HEAD', returnStdout: true).trim()
+                    env.PREV_IMAGE = sh(script: 'docker image inspect $IMAGE:latest --format "{{.Id}}" 2>/dev/null || true', returnStdout: true).trim()
+                }
+                sh 'bash $DEPLOY_DIR/scripts/ensure-builder.sh'
+            }
+        }
+        stage('Build') {
+            steps {
+                dir('app') {
+                    sh 'docker buildx build --builder hcl-builder --load -f Dockerfile-frontend -t $IMAGE:$TAG -t $IMAGE:latest .'
+                }
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh 'cd $DEPLOY_DIR && docker compose up -d --no-deps nginx'
+            }
+        }
+        stage('Health check') {
+            steps {
+                sh '''
+                    cd $DEPLOY_DIR
+                    for i in $(seq 1 12); do
+                      docker compose exec -T nginx wget -q -O /dev/null http://127.0.0.1/ && echo "nginx: ok" && exit 0
+                      sleep 5
+                    done
+                    docker compose logs --tail 50 nginx
+                    exit 1
+                '''
+            }
+        }
+    }
+    post {
+        failure {
+            script {
+                if (env.PREV_IMAGE) {
+                    sh 'docker tag $PREV_IMAGE $IMAGE:latest && cd $DEPLOY_DIR && docker compose up -d --no-deps nginx'
+                    echo '배포 실패: 직전 버전으로 되돌렸습니다.'
+                }
+            }
+        }
+        success {
+            sh '''
+                docker images $IMAGE --format "{{.Tag}}" | grep -v '^latest$' | tail -n +6 | xargs -r -I{} docker rmi $IMAGE:{} || true
+                docker image prune -f
+            '''
+        }
+    }
+}

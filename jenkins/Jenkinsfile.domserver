@@ -1,0 +1,38 @@
+// DOMjudge domserver 재배포 (수동 실행 전용)
+// Domjudge 레포 master 의 커스텀 JudgementController.php 를 바꿨을 때 'Build Now' 로 실행한다.
+// 빌드할 때 GitHub 에서 최신 컨트롤러를 내려받으므로 파일을 복사할 필요는 없다.
+// 실행 중 1~2분 동안 채점이 멈추므로 시험·과제 마감 시간에는 실행하지 않는다.
+pipeline {
+    agent any
+    options { disableConcurrentBuilds() }
+    stages {
+        stage('Build') {
+            steps {
+                // 배포 레포(이 Jenkinsfile 이 있는 레포)의 domserver/Dockerfile 로 빌드한다.
+                // --no-cache: 컨트롤러를 항상 GitHub 에서 새로 받도록
+                checkout scm
+                sh 'docker build --no-cache -t hcl-domserver:9.0.0 domserver/'
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh 'cd $DEPLOY_DIR && docker compose up -d --no-deps domserver'
+            }
+        }
+        stage('Health check') {
+            steps {
+                sh '''
+                    cd $DEPLOY_DIR
+                    for i in $(seq 1 36); do
+                      status=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q domserver))
+                      echo "domserver: $status"
+                      [ "$status" = "healthy" ] && exit 0
+                      sleep 5
+                    done
+                    docker compose logs --tail 100 domserver
+                    exit 1
+                '''
+            }
+        }
+    }
+}

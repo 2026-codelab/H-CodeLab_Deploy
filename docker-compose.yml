@@ -1,0 +1,230 @@
+# H-CodeLab 운영 스택. 서버의 /home/codelab/hcl 에서 실행한다.
+# 비밀값과 서버별 설정은 같은 폴더의 .env 에서 읽는다 (.env.example 참고).
+# 주의: 'docker compose down -v' 는 DB 볼륨까지 지우므로 절대 쓰지 않는다.
+name: hcl
+
+# judgehost 공통 설정. 개수를 늘릴 때는 아래 services 의 judgehost-N 블록을 복사한다.
+x-judgehost: &judgehost
+  image: domjudge/judgehost:9.0.0
+  restart: unless-stopped
+  privileged: true
+  cgroup: host
+  volumes:
+    - /sys/fs/cgroup:/sys/fs/cgroup
+  depends_on:
+    domserver:
+      condition: service_healthy
+  networks: [hcl-net]
+
+x-judgehost-env: &judgehost-env
+  DOMSERVER_BASEURL: http://domserver/
+  JUDGEDAEMON_USERNAME: judgehost
+  JUDGEDAEMON_PASSWORD: ${JUDGEDAEMON_PASSWORD:-not-set-yet}
+  CONTAINER_TIMEZONE: Asia/Seoul
+
+services:
+  # ---------- 화면 + 리버스 프록시 (외부에 열리는 유일한 서비스) ----------
+  nginx:
+    image: hcl-frontend:latest
+    restart: unless-stopped
+    cpuset: "${SYSTEM_CPUS}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    networks: [hcl-net]
+
+  # ---------- 애플리케이션 ----------
+  backend:
+    image: hcl-backend:latest
+    restart: unless-stopped
+    cpuset: "${SYSTEM_CPUS}"
+    environment:
+      TZ: Asia/Seoul
+      DB_URL: jdbc:mariadb://web-db:3306/handongjudge
+      DB_USERNAME: handongjudge_user
+      DB_PASSWORD: ${WEB_DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      FRONTEND_URL: ${SITE_URL}
+      COOKIE_SECURE: ${COOKIE_SECURE}
+      DOMJUDGE_URL: http://domserver
+      DOMJUDGE_ID: ${DOMJUDGE_API_USER}
+      DOMJUDGE_PW: ${DOMJUDGE_API_PASSWORD:-not-set-yet}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-unused}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-unused}
+      SSH_TUNNEL_ENABLED: "false"
+    volumes:
+      - backend_logs:/var/log/handongjudge
+    depends_on:
+      web-db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks: [hcl-net]
+
+  web-db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    cpuset: "${SYSTEM_CPUS}"
+    environment:
+      TZ: Asia/Seoul
+      MARIADB_ROOT_PASSWORD: ${WEB_DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: handongjudge
+      MARIADB_USER: handongjudge_user
+      MARIADB_PASSWORD: ${WEB_DB_PASSWORD}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - web_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [hcl-net]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    cpuset: "${SYSTEM_CPUS}"
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks: [hcl-net]
+
+  # ---------- DOMjudge ----------
+  domserver:
+    build: ./domserver
+    image: hcl-domserver:9.0.0
+    restart: unless-stopped
+    cpuset: "${SYSTEM_CPUS}"
+    environment:
+      CONTAINER_TIMEZONE: Asia/Seoul
+      MYSQL_HOST: dom-db
+      MYSQL_DATABASE: domjudge
+      MYSQL_USER: domjudge
+      MYSQL_PASSWORD: ${DOM_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DOM_DB_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:12345:80"   # 관리자 화면: SSH 터널로만 접속
+    volumes:
+      - domserver_etc:/opt/domjudge/domserver/etc
+    depends_on:
+      dom-db:
+        condition: service_healthy
+    networks: [hcl-net]
+
+  dom-db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    cpuset: "${SYSTEM_CPUS}"
+    environment:
+      TZ: Asia/Seoul
+      MARIADB_ROOT_PASSWORD: ${DOM_DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: domjudge
+      MARIADB_USER: domjudge
+      MARIADB_PASSWORD: ${DOM_DB_PASSWORD}
+    command: --max-connections=1000 --max-allowed-packet=512M
+    volumes:
+      - dom_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [hcl-net]
+
+  # judgehost: DAEMON_ID = 이 judgehost가 혼자 쓰는 CPU 코어 번호 (SYSTEM_CPUS 와 겹치면 안 됨)
+  #            RUN_USER_UID_GID = 62860 + DAEMON_ID
+  # 우리 서버(ai.walab.info): 물리 코어 4~12 에 하나씩 (9개). 하이퍼스레드 짝(28~36)은 비워 두어 채점 시간을 안정시킨다.
+  judgehost-1:
+    <<: *judgehost
+    hostname: judgehost-1
+    environment:
+      <<: *judgehost-env
+      DAEMON_ID: "4"
+      RUN_USER_UID_GID: "62864"
+
+  judgehost-2:
+    <<: *judgehost
+    hostname: judgehost-2
+    environment:
+      <<: *judgehost-env
+      DAEMON_ID: "5"
+      RUN_USER_UID_GID: "62865"
+
+  judgehost-3:
+    <<: *judgehost
+    hostname: judgehost-3
+    environment:
+      <<: *judgehost-env
+      DAEMON_ID: "6"
+      RUN_USER_UID_GID: "62866"
+
+  judgehost-4:
+    <<: *judgehost
+    hostname: judgehost-4
+    environment:
+      <<: *judgehost-env
+      DAEMON_ID: "7"
+      RUN_USER_UID_GID: "62867"
+
+  judgehost-5:
+    <<: *judgehost
+    hostname: judgehost-5
+    environment:
+      <<: *judgehost-env
+      DAEMON_ID: "8"
+      RUN_USER_UID_GID: "62868"
+
+  judgehost-6:
+    <<: *judgehost
+    hostname: judgehost-6
+    environment:
+      <<: *judgehost-env
+      DAEMON_ID: "9"
+      RUN_USER_UID_GID: "62869"
+
+  judgehost-7:
+    <<: *judgehost
+    hostname: judgehost-7
+    environment:
+      <<: *judgehost-env
+      DAEMON_ID: "10"
+      RUN_USER_UID_GID: "62870"
+
+  judgehost-8:
+    <<: *judgehost
+    hostname: judgehost-8
+    environment:
+      <<: *judgehost-env
+      DAEMON_ID: "11"
+      RUN_USER_UID_GID: "62871"
+
+  judgehost-9:
+    <<: *judgehost
+    hostname: judgehost-9
+    environment:
+      <<: *judgehost-env
+      DAEMON_ID: "12"
+      RUN_USER_UID_GID: "62872"
+
+volumes:
+  web_db_data:
+  dom_db_data:
+  redis_data:
+  domserver_etc:
+  backend_logs:
+
+networks:
+  hcl-net:
+    name: hcl-net

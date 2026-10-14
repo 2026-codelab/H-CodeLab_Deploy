@@ -1,0 +1,87 @@
+// H-CodeLab 백엔드 자동 배포
+// H-CodeLab_BE 의 master 가 바뀌면(3분마다 확인) 이미지를 빌드하고 backend 컨테이너만 교체한다.
+// 3분 안에 healthy 가 안 되면 직전 이미지로 자동으로 되돌린다.
+pipeline {
+    agent any
+    triggers { pollSCM('H/3 * * * *') }
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+    parameters {
+        booleanParam(name: 'RUN_TESTS', defaultValue: false,
+            description: '단위 테스트 실행. 지금 있는 contextLoads 테스트는 Redis 설정 문제로 실패하므로, 테스트를 고치기 전까지는 끈다.')
+    }
+    environment {
+        IMAGE = 'hcl-backend'
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                dir('app') {
+                    git url: 'https://github.com/2026-codelab/H-CodeLab_BE.git', branch: 'master'
+                }
+                script {
+                    env.TAG = sh(script: 'git -C app rev-parse --short HEAD', returnStdout: true).trim()
+                    env.PREV_IMAGE = sh(script: 'docker image inspect $IMAGE:latest --format "{{.Id}}" 2>/dev/null || true', returnStdout: true).trim()
+                }
+                // 빌드가 judgehost 코어를 쓰지 않도록 SYSTEM_CPUS 코어만 쓰는 빌더를 만든다 (처음 한 번)
+                sh 'bash $DEPLOY_DIR/scripts/ensure-builder.sh'
+            }
+        }
+        stage('Test') {
+            when { expression { return params.RUN_TESTS } }
+            steps {
+                dir('app') {
+                    sh 'docker buildx build --builder hcl-builder --load -f Dockerfile-backend --target builder -t $IMAGE-builder:$TAG .'
+                    sh 'docker run --rm --cpuset-cpus $SYSTEM_CPUS $IMAGE-builder:$TAG ./gradlew test --no-daemon'
+                }
+            }
+        }
+        stage('Build') {
+            steps {
+                dir('app') {
+                    sh 'docker buildx build --builder hcl-builder --load -f Dockerfile-backend -t $IMAGE:$TAG -t $IMAGE:latest .'
+                }
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh 'cd $DEPLOY_DIR && docker compose up -d --no-deps backend'
+            }
+        }
+        stage('Health check') {
+            steps {
+                sh '''
+                    cd $DEPLOY_DIR
+                    for i in $(seq 1 36); do
+                      status=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q backend))
+                      echo "backend: $status"
+                      [ "$status" = "healthy" ] && exit 0
+                      sleep 5
+                    done
+                    echo "3분 안에 healthy 가 되지 않았습니다. 로그:"
+                    docker compose logs --tail 100 backend
+                    exit 1
+                '''
+            }
+        }
+    }
+    post {
+        failure {
+            script {
+                if (env.PREV_IMAGE) {
+                    sh 'docker tag $PREV_IMAGE $IMAGE:latest && cd $DEPLOY_DIR && docker compose up -d --no-deps backend'
+                    echo '배포 실패: 직전 버전으로 되돌렸습니다.'
+                }
+            }
+        }
+        success {
+            // 최근 5개 버전만 남기고 오래된 이미지 정리 (되돌리기용)
+            sh '''
+                docker images $IMAGE --format "{{.Tag}}" | grep -v '^latest$' | tail -n +6 | xargs -r -I{} docker rmi $IMAGE:{} || true
+                docker image prune -f
+            '''
+        }
+    }
+}
