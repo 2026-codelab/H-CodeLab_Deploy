@@ -39,8 +39,9 @@ pipeline {
             steps {
                 sh '''
                     cd $DEPLOY_DIR
+                    # http 는 https 로 리다이렉트(301)되므로 https 로 확인한다 (서버 안 요청이라 인증서 이름 검사는 생략)
                     for i in $(seq 1 12); do
-                      docker compose exec -T nginx wget -q -O /dev/null http://127.0.0.1/ && echo "nginx: ok" && exit 0
+                      docker compose exec -T nginx wget -q -O /dev/null --no-check-certificate https://127.0.0.1/ && echo "nginx: ok" && exit 0
                       sleep 5
                     done
                     docker compose logs --tail 50 nginx
