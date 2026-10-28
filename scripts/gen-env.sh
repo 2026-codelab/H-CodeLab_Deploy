@@ -13,7 +13,7 @@ rand() { openssl rand -hex "$1"; }
 
 read -rp "사이트 주소 (우리 서버: http://ai.walab.info): " SITE_URL
 read -rp "judgehost 가 쓰지 않는 CPU 코어 (우리 서버: 0-3,24-27): " SYSTEM_CPUS
-read -rsp "OpenAI API 키 (입력 내용은 화면에 안 보임): " LLM_API_KEY; echo
+read -rsp "로컬 LLM(vLLM) API 키, LLM 서버 /etc/vllm/env 의 값 (입력 내용은 화면에 안 보임): " LLM_API_KEY; echo
 read -rp "메일 발송용 Gmail 주소 (없으면 Enter): " MAIL_USERNAME
 MAIL_PASSWORD=""
 if [ -n "$MAIL_USERNAME" ]; then
@@ -46,8 +46,9 @@ REDIS_PASSWORD=$(rand 24)
 
 # ===== 백엔드 =====
 JWT_SECRET_KEY=$(rand 64)
+LLM_BASE_URL=https://ai.walab.info/v1
 LLM_API_KEY=${LLM_API_KEY}
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=lab-llm
 MAIL_USERNAME=${MAIL_USERNAME}
 MAIL_PASSWORD=${MAIL_PASSWORD}
 
