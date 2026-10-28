@@ -23,18 +23,16 @@ x-judgehost-env: &judgehost-env
   CONTAINER_TIMEZONE: Asia/Seoul
 
 services:
-  # ---------- 화면 + 리버스 프록시 (외부에 열리는 유일한 서비스) ----------
+  # ---------- 화면 + 리버스 프록시 ----------
+  # 서버에 직접 설치한 nginx(80/443, HTTPS)가 이 포트로 넘겨준다. 서버 밖에서는 직접 접속할 수 없다.
   nginx:
     image: hcl-frontend:latest
     restart: unless-stopped
     cpuset: "${SYSTEM_CPUS}"
     ports:
-      - "80:80"
-      - "443:443"
+      - "127.0.0.1:8081:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certbot/conf:/etc/letsencrypt:ro
-      - ./certbot/www:/var/www/certbot:ro
     networks: [hcl-net]
 
   # ---------- 애플리케이션 ----------
