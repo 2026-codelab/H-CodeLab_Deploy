@@ -54,9 +54,10 @@ services:
       DOMJUDGE_URL: http://domserver/domjudge
       DOMJUDGE_ID: ${DOMJUDGE_API_USER}
       DOMJUDGE_PW: ${DOMJUDGE_API_PASSWORD:-not-set-yet}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      # 힌트용 LLM: 연구실 로컬 LLM(vLLM)만 쓴다
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://ai.walab.info/v1}
       LLM_API_KEY: ${LLM_API_KEY}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MODEL: ${LLM_MODEL:-lab-llm}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-unused}
