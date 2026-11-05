@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DB 2개(web-db, dom-db)를 덤프해서 /home/codelab/hcl-backup 에 저장하고, 7일 지난 백업은 지운다.
+# DB 3개(web-db 의 handongjudge·testrun, dom-db 의 domjudge)를 덤프해서 /home/codelab/hcl-backup 에 저장하고, 7일 지난 백업은 지운다.
 # Jenkins 'hcl-backup' 작업이 매일 새벽 4시쯤 실행한다. 직접 실행: bash /home/codelab/hcl/scripts/backup.sh
 set -euo pipefail
 cd /home/codelab/hcl
@@ -12,9 +12,12 @@ docker compose exec -T web-db sh -c 'exec mariadb-dump -uroot -p"$MARIADB_ROOT_P
   | gzip > "$OUT/web-db-$TS.sql.gz"
 docker compose exec -T dom-db sh -c 'exec mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" --single-transaction --routines --triggers domjudge' \
   | gzip > "$OUT/dom-db-$TS.sql.gz"
+# 테스트하기 결과. 이 덤프가 실패해도 위의 두 백업은 남도록 마지막에 둔다
+docker compose exec -T web-db sh -c 'exec mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" --single-transaction --routines --triggers testrun' \
+  | gzip > "$OUT/testrun-db-$TS.sql.gz"
 
 # 빈 파일이면 실패로 본다
-for f in "$OUT/web-db-$TS.sql.gz" "$OUT/dom-db-$TS.sql.gz"; do
+for f in "$OUT/web-db-$TS.sql.gz" "$OUT/dom-db-$TS.sql.gz" "$OUT/testrun-db-$TS.sql.gz"; do
   if [ "$(gzip -dc "$f" | head -c 100 | wc -c)" -lt 100 ]; then
     echo "백업이 비어 있습니다: $f"
     exit 1

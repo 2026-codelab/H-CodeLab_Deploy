@@ -65,6 +65,11 @@ services:
       SSH_TUNNEL_ENABLED: "false"
       # 메일은 선택 기능이라 헬스체크에서 뺀다 (Gmail 미설정·장애로 배포가 실패하지 않도록)
       MANAGEMENT_HEALTH_MAIL_ENABLED: "false"
+      # 테스트하기 경량 실행기. domjudge 면 기존 경로, runner 면 모든 분반이 실행기를 쓴다
+      TESTRUN_EXECUTOR: ${TESTRUN_EXECUTOR:-domjudge}
+      TESTRUN_SERVICE_URL: http://testrun-service:8090
+      TESTRUN_SERVICE_TOKEN: ${TESTRUN_SERVICE_TOKEN:-}
+      TESTRUN_INTERNAL_TOKEN: ${TESTRUN_INTERNAL_TOKEN:-}
     volumes:
       - backend_logs:/var/log/handongjudge
     depends_on:
@@ -224,12 +229,67 @@ services:
       DAEMON_ID: "12"
       RUN_USER_UID_GID: "62872"
 
+  # ---------- 테스트하기 경량 실행기 (H-CodeLab_TestRun) ----------
+  # backend 의 depends_on 에 넣지 않는다: 실행기가 멈춰도 backend 는 떠야 하고, 테스트하기는 DOMjudge 경로로 넘어간다.
+  testrun-service:
+    image: hcl-testrun-service:latest
+    restart: unless-stopped
+    cpuset: "${SYSTEM_CPUS}"
+    environment:
+      TZ: Asia/Seoul
+      TESTRUN_DB_URL: jdbc:mariadb://web-db:3306/testrun
+      TESTRUN_DB_USERNAME: testrun_svc
+      TESTRUN_DB_PASSWORD: ${TESTRUN_DB_PASSWORD}
+      TESTRUN_SERVICE_TOKEN: ${TESTRUN_SERVICE_TOKEN}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      web-db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks: [hcl-net]
+
+  # RUNNER_CPUS: 슬롯마다 혼자 쓰는 CPU 코어. judgehost(4-12)·SYSTEM_CPUS 와 겹치면 안 되고, 개수는 RUNNER_SLOTS 와 맞춘다.
+  # judgehost 처럼 컨테이너에 cpuset 을 걸지 않고, 학생 코드만 runguard 가 해당 코어에 고정한다.
+  testrun-runner:
+    image: hcl-testrun-runner:latest
+    restart: unless-stopped
+    hostname: testrun-runner-1
+    privileged: true
+    cgroup: host
+    environment:
+      RUNNER_ID: runner-1
+      RUNNER_SLOTS: ${RUNNER_SLOTS}
+      RUNNER_CPUS: ${RUNNER_CPUS}
+      RUNNER_JUDGE_MODE: direct
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      DOMSERVER_BASEURL: http://domserver/domjudge/   # domserver WEBAPP_BASEURL 과 맞춘다
+      DOMSERVER_USER: ${DOMJUDGE_API_USER}
+      DOMSERVER_PASSWORD: ${DOMJUDGE_API_PASSWORD}
+      HCL_INTERNAL_BASEURL: http://backend:8080/
+      HCL_INTERNAL_TOKEN: ${TESTRUN_INTERNAL_TOKEN}
+      CONTAINER_TIMEZONE: Asia/Seoul
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup
+      - testrun_testcases:/opt/domjudge/judgehost/judgings/testrun/testcases   # 테스트케이스 캐시 (재빌드해도 유지)
+    depends_on:
+      domserver:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks: [hcl-net]
+
 volumes:
   web_db_data:
   dom_db_data:
   redis_data:
   domserver_etc:
   backend_logs:
+  testrun_testcases:
 
 networks:
   hcl-net:

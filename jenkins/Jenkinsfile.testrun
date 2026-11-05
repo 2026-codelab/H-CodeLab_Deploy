@@ -1,0 +1,90 @@
+// 테스트하기 경량 실행기 자동 배포
+// H-CodeLab_TestRun 의 main 이 바뀌면(3분마다 확인) 이미지 2개를 빌드하고 testrun-service·testrun-runner 컨테이너만 교체한다.
+// 5분 안에 둘 다 healthy 가 안 되면 직전 이미지로 자동으로 되돌린다.
+// 러너가 재시작되는 동안 진행 중인 테스트하기는 오류로 끝날 수 있고, 새 요청은 DOMjudge 경로로 넘어간다.
+pipeline {
+    agent any
+    triggers { pollSCM('H/3 * * * *') }
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+    environment {
+        SERVICE_IMAGE = 'hcl-testrun-service'
+        RUNNER_IMAGE = 'hcl-testrun-runner'
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                dir('app') {
+                    git url: 'https://github.com/2026-codelab/H-CodeLab_TestRun.git', branch: 'main'
+                }
+                script {
+                    env.TAG = sh(script: 'git -C app rev-parse --short HEAD', returnStdout: true).trim()
+                    env.PREV_SERVICE_IMAGE = sh(script: 'docker image inspect $SERVICE_IMAGE:latest --format "{{.Id}}" 2>/dev/null || true', returnStdout: true).trim()
+                    env.PREV_RUNNER_IMAGE = sh(script: 'docker image inspect $RUNNER_IMAGE:latest --format "{{.Id}}" 2>/dev/null || true', returnStdout: true).trim()
+                }
+                // 빌드가 judgehost·러너 코어를 쓰지 않도록 SYSTEM_CPUS 코어만 쓰는 빌더를 만든다 (처음 한 번)
+                sh 'bash $DEPLOY_DIR/scripts/ensure-builder.sh'
+            }
+        }
+        stage('Build') {
+            steps {
+                // 빌드 context 는 레포 루트. 러너는 judgehost 와 같은 amd64 로 빌드한다.
+                dir('app') {
+                    sh 'docker buildx build --builder hcl-builder --load -f testrun-service/Dockerfile -t $SERVICE_IMAGE:$TAG -t $SERVICE_IMAGE:latest .'
+                    sh 'docker buildx build --builder hcl-builder --load --platform linux/amd64 -f testrun-runner/Dockerfile -t $RUNNER_IMAGE:$TAG -t $RUNNER_IMAGE:latest .'
+                }
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh 'cd $DEPLOY_DIR && docker compose up -d --no-deps testrun-service testrun-runner'
+            }
+        }
+        stage('Health check') {
+            steps {
+                // 러너의 시작 대기(start-period)가 180초라 backend 보다 오래 기다린다
+                sh '''
+                    cd $DEPLOY_DIR
+                    for i in $(seq 1 60); do
+                      service=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q testrun-service))
+                      runner=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q testrun-runner))
+                      echo "testrun-service: $service, testrun-runner: $runner"
+                      [ "$service" = "healthy" ] && [ "$runner" = "healthy" ] && exit 0
+                      sleep 5
+                    done
+                    echo "5분 안에 healthy 가 되지 않았습니다. 로그:"
+                    docker compose logs --tail 100 testrun-service testrun-runner
+                    exit 1
+                '''
+            }
+        }
+    }
+    post {
+        failure {
+            script {
+                // 이미지가 하나만 새로 빌드된 채 실패할 수 있어 둘 다 되돌린다
+                if (env.PREV_SERVICE_IMAGE) {
+                    sh 'docker tag $PREV_SERVICE_IMAGE $SERVICE_IMAGE:latest'
+                }
+                if (env.PREV_RUNNER_IMAGE) {
+                    sh 'docker tag $PREV_RUNNER_IMAGE $RUNNER_IMAGE:latest'
+                }
+                if (env.PREV_SERVICE_IMAGE && env.PREV_RUNNER_IMAGE) {
+                    sh 'cd $DEPLOY_DIR && docker compose up -d --no-deps testrun-service testrun-runner'
+                    echo '배포 실패: 직전 버전으로 되돌렸습니다.'
+                }
+            }
+        }
+        success {
+            // 이미지별로 최근 5개 버전만 남기고 오래된 이미지 정리 (되돌리기용)
+            sh '''
+                for image in $SERVICE_IMAGE $RUNNER_IMAGE; do
+                  docker images $image --format "{{.Tag}}" | grep -v '^latest$' | tail -n +6 | xargs -r -I{} docker rmi $image:{} || true
+                done
+                docker image prune -f
+            '''
+        }
+    }
+}
