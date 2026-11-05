@@ -261,7 +261,7 @@ services:
     cgroup: host
     environment:
       RUNNER_ID: runner-1
-      RUNNER_SLOTS: ${RUNNER_SLOTS:-4}
+      RUNNER_SLOTS: ${RUNNER_SLOTS}
       RUNNER_CPUS: ${RUNNER_CPUS}
       RUNNER_JUDGE_MODE: direct
       REDIS_HOST: redis

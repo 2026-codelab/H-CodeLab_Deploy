@@ -56,6 +56,15 @@ MAIL_PASSWORD=${MAIL_PASSWORD}
 JUDGEDAEMON_PASSWORD=
 DOMJUDGE_API_USER=admin
 DOMJUDGE_API_PASSWORD=
+
+# ===== 테스트하기 실행기 =====
+# RUNNER_CPUS 는 서버마다 달라서 직접 채운다 (형식 설명은 .env.example 참고)
+TESTRUN_EXECUTOR=domjudge
+TESTRUN_DB_PASSWORD=$(rand 24)
+TESTRUN_SERVICE_TOKEN=$(rand 32)
+TESTRUN_INTERNAL_TOKEN=$(rand 32)
+RUNNER_SLOTS=2
+RUNNER_CPUS=
 EOF
 
 # Jenkins 컨테이너(docker 그룹)도 읽을 수 있게 한다
