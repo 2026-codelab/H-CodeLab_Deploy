@@ -11,8 +11,8 @@ fi
 
 rand() { openssl rand -hex "$1"; }
 
-read -rp "사이트 주소 (우리 서버: http://ai.walab.info): " SITE_URL
-read -rp "judgehost 가 쓰지 않는 CPU 코어 (우리 서버: 0-3,24-27): " SYSTEM_CPUS
+read -rp "사이트 주소 (153 서버, 도메인 전: http://203.252.112.153): " SITE_URL
+read -rp "judgehost 가 쓰지 않는 CPU 코어 (153 서버: 0-1,16-17): " SYSTEM_CPUS
 read -rsp "로컬 LLM(vLLM) API 키, LLM 서버 /etc/vllm/env 의 값 (입력 내용은 화면에 안 보임): " LLM_API_KEY; echo
 read -rp "메일 발송용 Gmail 주소 (없으면 Enter): " MAIL_USERNAME
 MAIL_PASSWORD=""
@@ -58,13 +58,13 @@ DOMJUDGE_API_USER=admin
 DOMJUDGE_API_PASSWORD=
 
 # ===== 테스트하기 실행기 =====
-# RUNNER_CPUS 는 서버마다 달라서 직접 채운다 (형식 설명은 .env.example 참고)
-TESTRUN_EXECUTOR=domjudge
+# RUNNER_CPUS 는 153 서버 기준 값이다. 다른 서버면 직접 고친다 (형식 설명은 .env.example 참고)
+TESTRUN_EXECUTOR=runner
 TESTRUN_DB_PASSWORD=$(rand 24)
 TESTRUN_SERVICE_TOKEN=$(rand 32)
 TESTRUN_INTERNAL_TOKEN=$(rand 32)
 RUNNER_SLOTS=2
-RUNNER_CPUS=
+RUNNER_CPUS=6,7
 EOF
 
 # Jenkins 컨테이너(docker 그룹)도 읽을 수 있게 한다

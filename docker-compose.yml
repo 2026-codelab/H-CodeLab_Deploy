@@ -156,78 +156,39 @@ services:
 
   # judgehost: DAEMON_ID = 이 judgehost가 혼자 쓰는 CPU 코어 번호 (SYSTEM_CPUS 와 겹치면 안 됨)
   #            RUN_USER_UID_GID = 62860 + DAEMON_ID
-  # 우리 서버(ai.walab.info): 물리 코어 4~12 에 하나씩 (9개). 하이퍼스레드 짝(28~36)은 비워 두어 채점 시간을 안정시킨다.
+  # 153 서버(소켓 0 = CPU 0-7, 짝 16-23): 물리 코어 2~5 에 하나씩 (4개). 하이퍼스레드 짝(18~21)은 비워 두어 채점 시간을 안정시킨다.
+  # 코어 6·7 은 테스트하기 실행기(RUNNER_CPUS), 0-1·16-17 은 SYSTEM_CPUS 가 쓴다.
   judgehost-1:
     <<: *judgehost
     hostname: judgehost-1
     environment:
       <<: *judgehost-env
-      DAEMON_ID: "4"
-      RUN_USER_UID_GID: "62864"
+      DAEMON_ID: "2"
+      RUN_USER_UID_GID: "62862"
 
   judgehost-2:
     <<: *judgehost
     hostname: judgehost-2
     environment:
       <<: *judgehost-env
-      DAEMON_ID: "5"
-      RUN_USER_UID_GID: "62865"
+      DAEMON_ID: "3"
+      RUN_USER_UID_GID: "62863"
 
   judgehost-3:
     <<: *judgehost
     hostname: judgehost-3
     environment:
       <<: *judgehost-env
-      DAEMON_ID: "6"
-      RUN_USER_UID_GID: "62866"
+      DAEMON_ID: "4"
+      RUN_USER_UID_GID: "62864"
 
   judgehost-4:
     <<: *judgehost
     hostname: judgehost-4
     environment:
       <<: *judgehost-env
-      DAEMON_ID: "7"
-      RUN_USER_UID_GID: "62867"
-
-  judgehost-5:
-    <<: *judgehost
-    hostname: judgehost-5
-    environment:
-      <<: *judgehost-env
-      DAEMON_ID: "8"
-      RUN_USER_UID_GID: "62868"
-
-  judgehost-6:
-    <<: *judgehost
-    hostname: judgehost-6
-    environment:
-      <<: *judgehost-env
-      DAEMON_ID: "9"
-      RUN_USER_UID_GID: "62869"
-
-  judgehost-7:
-    <<: *judgehost
-    hostname: judgehost-7
-    environment:
-      <<: *judgehost-env
-      DAEMON_ID: "10"
-      RUN_USER_UID_GID: "62870"
-
-  judgehost-8:
-    <<: *judgehost
-    hostname: judgehost-8
-    environment:
-      <<: *judgehost-env
-      DAEMON_ID: "11"
-      RUN_USER_UID_GID: "62871"
-
-  judgehost-9:
-    <<: *judgehost
-    hostname: judgehost-9
-    environment:
-      <<: *judgehost-env
-      DAEMON_ID: "12"
-      RUN_USER_UID_GID: "62872"
+      DAEMON_ID: "5"
+      RUN_USER_UID_GID: "62865"
 
   # ---------- 테스트하기 경량 실행기 (H-CodeLab_TestRun) ----------
   # backend 의 depends_on 에 넣지 않는다: 실행기가 멈춰도 backend 는 떠야 하고, 테스트하기는 DOMjudge 경로로 넘어간다.
@@ -251,7 +212,7 @@ services:
         condition: service_started
     networks: [hcl-net]
 
-  # RUNNER_CPUS: 슬롯마다 혼자 쓰는 CPU 코어. judgehost(4-12)·SYSTEM_CPUS 와 겹치면 안 되고, 개수는 RUNNER_SLOTS 와 맞춘다.
+  # RUNNER_CPUS: 슬롯마다 혼자 쓰는 CPU 코어. judgehost(2-5)·SYSTEM_CPUS 와 겹치면 안 되고 (153 서버: 6,7), 개수는 RUNNER_SLOTS 와 맞춘다.
   # judgehost 처럼 컨테이너에 cpuset 을 걸지 않고, 학생 코드만 runguard 가 해당 코어에 고정한다.
   testrun-runner:
     image: hcl-testrun-runner:latest
@@ -294,3 +255,6 @@ volumes:
 networks:
   hcl-net:
     name: hcl-net
+    ipam:
+      config:
+        - subnet: 192.168.240.0/24   # 게이트웨이 192.168.240.1 을 nginx/default.conf 의 set_real_ip_from 과 맞춘다
